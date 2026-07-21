@@ -222,6 +222,14 @@ def main():
     if args.max_rounds:
         MAX_ROUNDS = args.max_rounds
 
+    # bridge: copy non-target.py to target.py so check can import from target
+    _original_target = None
+    if TARGET_FILE.name != "target.py":
+        _original_target = TARGET_FILE
+        shutil.copy(TARGET_FILE, LOOP_DIR / "target.py")
+        TARGET_FILE = LOOP_DIR / "target.py"
+        print(f"  [BRIDGE] {_original_target.name} -> target.py")
+
     use_mock = args.mock
 
     # 选择 THINK 函数
@@ -258,6 +266,9 @@ def main():
             if stdout.strip():
                 for line in stdout.strip().split("\n"):
                     print(f"      {line}")
+            if _original_target:
+                shutil.copy(TARGET_FILE, _original_target)
+                print(f"  [BRIDGE] 修复结果已写回 {_original_target.name}")
             break
         else:
             print(f"  >>> 测试失败，开始本轮修复流程。")
@@ -299,6 +310,8 @@ def main():
         print(f"\n{'─' * 50}")
         print(f"  [GUARD] 已达到最大轮数 ({MAX_ROUNDS})，循环终止。")
         print(f"  请手动检查 target.py 和 {BACKUP_DIR.name}/ 中的备份文件。")
+        if _original_target:
+            shutil.copy(TARGET_FILE, _original_target)
         print(f"{'─' * 50}")
         sys.exit(1)
 
