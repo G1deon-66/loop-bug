@@ -23,6 +23,8 @@ import shutil
 import datetime
 import argparse
 from pathlib import Path
+from summ import print_summary, write_log
+from think import validate_fix, clean_ai_response
 
 # ─── 配置 ────────────────────────────────────────────
 
@@ -153,37 +155,24 @@ def call_ai_fix(target_code, check_output):
 # ─── Mock 模式: 模拟 AI 回复（用于测试 loop 逻辑）─────
 
 MOCK_FIX = '''"""
-一个排序模块 —— 修复后的版本（供 Mock 模式使用）。
+汇率转换模块 —— 修复后的版本（供 Mock 模式使用）。
 
-修复说明: sort_list() 的比较条件从 < 改为 >，现在正确进行升序排序。
+修复说明: 外币转 CNY 时将 / 改回 *，现在正确转换。
 """
 
 
-def sort_list(arr):
-    """
-    使用冒泡排序对列表进行升序排列。
-
-    参数:
-      arr: 整数列表
-
-    返回:
-      升序排列后的新列表
-    """
-    result = list(arr)
-    n = len(result)
-
-    for i in range(n):
-        swapped = False
-        for j in range(0, n - i - 1):
-            if result[j] > result[j + 1]:
-                result[j], result[j + 1] = result[j + 1], result[j]
-                swapped = True
-        if not swapped:
-            break
-
-    return result
+def convert(amount, from_currency, to_currency):
+    rates = {'USD': 7.2, 'EUR': 7.8}
+    if from_currency == 'CNY':
+        cny = amount
+    else:
+        cny = amount * rates.get(from_currency, 1)
+    if to_currency == 'CNY':
+        return round(cny, 2)
+    else:
+        result = cny / rates.get(to_currency, 1)
+        return round(result, 2)
 '''
-
 
 def call_mock_fix(target_code, check_output):
     """模拟 AI 修复：直接返回正确的代码。"""
@@ -231,6 +220,7 @@ def main():
         print(f"  [BRIDGE] {_original_target.name} -> target.py")
 
     use_mock = args.mock
+    _history = ""
 
     # 选择 THINK 函数
     think_func = call_mock_fix if use_mock else call_ai_fix
@@ -281,6 +271,9 @@ def main():
         # ────────── 护栏: 备份当前代码 ──────────
         print(f"\n  [GUARD] 备份当前 target.py ...")
         backup_target(round_num)
+        check_log = BACKUP_DIR / f"check_r{round_num:02d}.txt"
+        with open(check_log, "w", encoding="utf-8") as cl:
+            cl.write(stdout if stdout else "")
 
         # ────────── THINK: AI 分析并生成修复 ──────────
         print(f"\n  [THINK] 调用 AI 模型分析 bug 并生成修复 ...")
@@ -296,6 +289,11 @@ def main():
             continue
 
         # 简单校验: AI 返回的内容不能为空或太短
+        fixed_code = clean_ai_response(fixed_code)
+        valid, reason = validate_fix(target_code, fixed_code)
+        if not valid:
+            print(f"  [THINK] Fix rejected: {reason}")
+            continue
         if not fixed_code or len(fixed_code.strip()) < 20:
             print(f"  [WARNING] AI 返回内容太短或为空，跳过本轮。")
             continue
@@ -304,6 +302,8 @@ def main():
         print(f"\n  [ACT] 将修复后的代码写入 {TARGET_FILE.name} ...")
         write_file(TARGET_FILE, fixed_code)
         print(f"  >>> 写入完成 ({len(fixed_code)} 字符)")
+        print_summary(round_num, target_code, fixed_code, stdout)
+        write_log(round_num, False, target_code, fixed_code, stdout)
 
     else:
         # ────────── 护栏: 耗尽最大轮数 ──────────
